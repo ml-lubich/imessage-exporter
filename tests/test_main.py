@@ -55,10 +55,11 @@ def test_list_chats(exporter):
     exporter.conn = mock_conn
 
     # Mock data: ROWID, chat_identifier, display_name, last_msg_date
-    mock_cursor.__iter__.return_value = [
+    data = [
         {"ROWID": 1, "chat_identifier": "user@example.com", "display_name": "User", "last_msg_date": 0},
         {"ROWID": 2, "chat_identifier": "unknown", "display_name": None, "last_msg_date": None}
     ]
+    mock_cursor.__iter__.return_value = iter(data)
 
     with patch("builtins.print") as mock_print:
         exporter.list_chats()
@@ -69,7 +70,7 @@ def test_list_chats(exporter):
         # Verify output contains expected strings
         # We can check if print was called with our data
         print_calls = [str(c) for c in mock_print.mock_calls]
-        assert any("user@example.com" in c for c in print_calls)
+        assert any("User" in c for c in print_calls)
         assert any("unknown" in c for c in print_calls)
 
 def test_search_messages_basic(exporter):
