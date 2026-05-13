@@ -1,6 +1,36 @@
 # iMessage Exporter
 
-A Python tool to search and export iMessages from your local macOS `chat.db`.
+> A Python tool to search and export iMessages from your local macOS
+> `chat.db`.
+
+```mermaid
+flowchart LR
+    USER[("👤 you<br/>Terminal · IDE")]
+    CLI{{"🧰 imessage-exporter<br/>CLI"}}
+    FLAGS["🎚 flags<br/>--search · --today · --date · --list-chats"]
+    DB[("🗄 ~/Library/Messages<br/>chat.db<br/>(needs Full Disk Access)")]
+    QUERY["🔍 SQL filter<br/>by date / text"]
+    OUT[/"📄 stdout<br/>messages · chat list"/]
+
+    USER --> CLI --> FLAGS --> QUERY
+    QUERY --> DB
+    DB --> QUERY --> OUT
+
+    classDef io fill:#0e1116,stroke:#2f81f7,stroke-width:1.5px,color:#e6edf3;
+    classDef tool fill:#161b22,stroke:#3fb950,stroke-width:1.5px,color:#e6edf3;
+    classDef brain fill:#161b22,stroke:#d29922,stroke-width:1.5px,color:#e6edf3;
+    classDef out fill:#0e1116,stroke:#a371f7,stroke-width:1.5px,color:#e6edf3;
+    class USER,DB io;
+    class FLAGS,QUERY tool;
+    class CLI brain;
+    class OUT out;
+```
+
+## Table of contents
+
+- [Installation](#installation)
+- [Usage](#usage)
+- [Permissions](#permissions)
 
 ## Installation
 
