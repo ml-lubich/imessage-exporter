@@ -34,6 +34,7 @@ flowchart LR
 - [Usage](#usage)
 - [Permissions](#permissions)
 - [🗺️ Repository map](#️-repository-map)
+- [📊 Code composition](#-code-composition)
 
 ## Filter algorithm
 
@@ -145,4 +146,16 @@ mindmap
     files
       README.md
       pyproject.toml
+```
+
+
+## 📊 Code composition
+
+File-type breakdown of source under this repo (skips `.git`, `node_modules`, build caches, lockfiles).
+
+```mermaid
+pie showData title File-type composition of imessage-exporter (10 files)
+    "Python" : 8
+    "TOML" : 1
+    "Markdown" : 1
 ```
