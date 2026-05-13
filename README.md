@@ -33,6 +33,7 @@ flowchart LR
 - [Filter algorithm](#filter-algorithm)
 - [Usage](#usage)
 - [Permissions](#permissions)
+- [🗺️ Repository map](#️-repository-map)
 
 ## Filter algorithm
 
@@ -126,3 +127,22 @@ imessage-exporter --search "meeting" --today
 ## Permissions
 
 This tool requires **Full Disk Access** for the terminal or IDE running it, as it reads directly from `~/Library/Messages/chat.db`.
+
+
+## 🗺️ Repository map
+
+Top-level layout of `imessage-exporter` rendered as a Mermaid mindmap (auto-generated from the on-disk tree).
+
+```mermaid
+mindmap
+  root((imessage-exporter))
+    src/
+      imessage_exporter
+    tests/
+      create_dummy_db.py
+      test_integration.py
+      test_unit.py
+    files
+      README.md
+      pyproject.toml
+```
