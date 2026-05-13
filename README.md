@@ -29,8 +29,28 @@ flowchart LR
 ## Table of contents
 
 - [Installation](#installation)
+- [Query flow (sequence)](#query-flow-sequence)
 - [Usage](#usage)
 - [Permissions](#permissions)
+
+## Query flow (sequence)
+
+```mermaid
+sequenceDiagram
+    participant U as user
+    participant CLI as imessage-exporter
+    participant P as arg parser
+    participant Q as SQL builder
+    participant DB as chat.db (SQLite)
+
+    U->>CLI: --search hello --today
+    CLI->>P: parse flags
+    P->>Q: build WHERE clauses<br/>(date range, LIKE)
+    Q->>DB: SELECT m.text, h.id, m.date<br/>FROM message m JOIN handle h
+    DB-->>Q: rows
+    Q-->>CLI: format records
+    CLI-->>U: stdout (matched messages)
+```
 
 ## Installation
 
