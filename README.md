@@ -30,8 +30,39 @@ flowchart LR
 
 - [Installation](#installation)
 - [Query flow (sequence)](#query-flow-sequence)
+- [Filter algorithm](#filter-algorithm)
 - [Usage](#usage)
 - [Permissions](#permissions)
+
+## Filter algorithm
+
+```mermaid
+flowchart LR
+    A([CLI flags])
+    B{"--list-chats?"}
+    C["SELECT chats"]
+    D{"--today?"}
+    E["date >= today 00:00"]
+    F{"--date YYYY-MM-DD?"}
+    G["date in [d, d+1)"]
+    H{"--search TEXT?"}
+    I["text LIKE %TEXT%"]
+    J["compose WHERE"]
+    K["SELECT m.text, h.id, m.date"]
+    L["format rows"]
+    Z([stdout])
+    A --> B
+    B -- yes --> C --> Z
+    B -- no  --> D
+    D -- yes --> E --> J
+    D -- no  --> F
+    F -- yes --> G --> J
+    F -- no  --> J
+    J --> H
+    H -- yes --> I --> K
+    H -- no  --> K
+    K --> L --> Z
+```
 
 ## Query flow (sequence)
 
