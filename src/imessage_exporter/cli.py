@@ -1,14 +1,15 @@
 import os
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .contacts import find_contacts_by_name
+from .contacts import find_contacts_by_name, handle_variants
 from .core import (
+    MessageQuery,
     build_export,
     find_chat_by_reference,
     find_chats_by_query,
@@ -29,13 +30,16 @@ from .utils import cocoa_to_datetime
 
 
 console = Console()
+HELP_OPTIONS = ["-h", "--help"]
 app = typer.Typer(
     add_completion=False,
+    context_settings={"help_option_names": HELP_OPTIONS},
     help="Export, search, and browse local iMessage chats.",
     invoke_without_command=True,
     rich_markup_mode="rich",
 )
 index_app = typer.Typer(
+    context_settings={"help_option_names": HELP_OPTIONS},
     help="Build and inspect the local all-message search index.",
     rich_markup_mode="rich",
 )
@@ -59,11 +63,27 @@ GRADIENT = [
     "rgb(178,128,255)",
 ]
 
+CONTACT_OPTION_LIMIT = 5
+CHAT_OPTION_LIMIT = 10
+DEFAULT_LIST_LIMIT = 25
+DEFAULT_VIEW_PAGE_SIZE = 10
+EXPORT_FORMATS = {"yaml", "json", "csv", "xlsx"}
+
 
 @dataclass
 class Settings:
     db_path: str
     contacts_db_paths: Optional[List[str]]
+
+
+@dataclass
+class TargetResolution:
+    chats: List[object]
+    contacts: List[dict]
+    handles: List[str]
+    label: str
+    ambiguous: bool = False
+    too_many: bool = False
 
 
 @app.callback()
@@ -91,32 +111,67 @@ def root(
 @app.command("list")
 def list_command(
     ctx: typer.Context,
-    limit: int = typer.Argument(25, min=1, max=500, help="Number of chats to show."),
+    target: Optional[str] = typer.Argument(
+        None,
+        help="Number of chats to show, or a contact/phone/email/chat search.",
+    ),
+    limit: int = typer.Option(
+        DEFAULT_LIST_LIMIT,
+        "--limit",
+        "-n",
+        min=1,
+        max=500,
+        help="Messages to show when listing one conversation.",
+    ),
 ) -> None:
-    """List recent chats, latest first."""
+    """List recent chats, or recent messages for one matched chat."""
+    if target and target.isdigit() and 1 <= int(target) <= 500 and limit == DEFAULT_LIST_LIMIT:
+        _list_recent_chat_table(ctx, int(target))
+        return
+
+    if not target:
+        _list_recent_chat_table(ctx, limit)
+        return
+
+    settings = _settings(ctx)
     conn = _connect(ctx)
     try:
-        rows = list_recent_chats(conn, limit)
+        resolution = _resolve_target(
+            conn,
+            target,
+            settings.contacts_db_paths,
+            include_groups=False,
+        )
+        if _handle_unselected_target(target, resolution):
+            raise typer.Exit(1)
+
+        if len(resolution.chats) > 1:
+            _print_chats_table(
+                resolution.chats,
+                title=f"Conversations matching {target!r}",
+            )
+            console.print(
+                "[yellow]More than one conversation matched.[/yellow] "
+                "Run `imsg list <ID>` or search more closely."
+            )
+            raise typer.Exit(1)
+
+        data = build_export(
+            conn,
+            resolution.chats,
+            label=resolution.label,
+            handles=resolution.handles,
+            limit=limit,
+            newest_first=True,
+        )
     finally:
         conn.close()
 
-    table = Table(title=f"Recent chats ({len(rows)})", expand=True)
-    table.add_column("ID", style="bold cyan", no_wrap=True)
-    table.add_column("Name")
-    table.add_column("Identifier", overflow="fold")
-    table.add_column("Messages", justify="right")
-    table.add_column("Last activity", no_wrap=True)
+    _print_export_messages(
+        data,
+        title=f"Recent messages for {resolution.label} ({data['message_count']})",
+    )
 
-    for row in rows:
-        table.add_row(
-            str(row["ROWID"]),
-            row["display_name"] or row["chat_identifier"] or "Unknown",
-            row["chat_identifier"] or "",
-            str(row["message_count"] or 0),
-            _format_date(row["last_msg_date"], "%Y-%m-%d %H:%M"),
-        )
-
-    console.print(table)
 
 
 @app.command("find")
@@ -170,12 +225,22 @@ def find_command(
 @app.command("search")
 def search_command(
     ctx: typer.Context,
-    query: str = typer.Argument(..., help="Text to search for."),
+    query: Optional[str] = typer.Argument(None, help="Optional text to search for."),
     limit: int = typer.Option(50, "--limit", "-n", min=1, max=500, help="Max messages."),
     date: Optional[str] = typer.Option(None, "--date", help="Only this date, YYYY-MM-DD."),
+    start_date: Optional[str] = typer.Option(
+        None,
+        "--from",
+        help="Start date, YYYY-MM-DD, inclusive.",
+    ),
+    end_date: Optional[str] = typer.Option(
+        None,
+        "--to",
+        help="End date, YYYY-MM-DD, inclusive.",
+    ),
 ) -> None:
-    """Search message text."""
-    _show_messages(ctx, query=query, date_filter=None, date=date, limit=limit)
+    """Search messages by text, date, range, or text plus range."""
+    _show_messages(ctx, query, date, start_date, end_date, limit)
 
 
 @app.command("semantic")
@@ -278,14 +343,32 @@ def index_status_command(
     console.print(table)
 
 
-@app.command("today")
-def today_command(
+@app.command("view")
+def view_command(
     ctx: typer.Context,
-    query: Optional[str] = typer.Argument(None, help="Optional text to search for today."),
-    limit: int = typer.Option(50, "--limit", "-n", min=1, max=500, help="Max messages."),
+    target: str = typer.Argument(..., help="Contact name, phone/email, chat ID, or chat identifier."),
+    page: int = typer.Option(1, "--page", "-p", min=1, help="Page number to show."),
+    page_size: int = typer.Option(DEFAULT_VIEW_PAGE_SIZE, "--page-size", "-n", min=1, max=500, help="Messages per page."),
+    all_messages: bool = typer.Option(False, "--all", "-a", help="Show all messages (ignores --page and --page-size)."),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Only messages containing this text."),
+    date: Optional[str] = typer.Option(None, "--date", help="Only this date, YYYY-MM-DD."),
+    start_date: Optional[str] = typer.Option(None, "--from", help="Start date, YYYY-MM-DD, inclusive."),
+    end_date: Optional[str] = typer.Option(None, "--to", help="End date, YYYY-MM-DD, inclusive."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Also export all matching messages to this file or directory."),
+    output_format: str = typer.Option("yaml", "--format", "-f", case_sensitive=False, help="Export format for --output."),
+    include_groups: bool = typer.Option(False, "--include-groups", help="Include group chats when resolving contacts."),
 ) -> None:
-    """Show today's messages, optionally filtered by text."""
-    _show_messages(ctx, query=query, date_filter="today", date=None, limit=limit)
+    """Page through one conversation and optionally export filtered messages."""
+    effective_limit = None if all_messages else page_size
+    effective_page = 1 if all_messages else page
+    query = _message_query(search, date, start_date, end_date, effective_limit, effective_page)
+    data = _load_export_data(ctx, target, include_groups, query)
+    _print_export_messages(data, title=_view_title(data, effective_page, effective_limit))
+    _print_view_hint(target, effective_page, effective_limit, data)
+    if output:
+        export_query = _message_query(search, date, start_date, end_date, None, 1)
+        export_data = _load_export_data(ctx, target, include_groups, export_query)
+        _write_export_data(export_data, output, output_format)
 
 
 @app.command("export")
@@ -303,7 +386,7 @@ def export_command(
         "--format",
         "-f",
         case_sensitive=False,
-        help="Export format: yaml or json.",
+        help="Export format: yaml, json, csv, or xlsx.",
     ),
     limit: Optional[int] = typer.Option(
         None,
@@ -318,43 +401,28 @@ def export_command(
         "--include-groups",
         help="Include group chats when exporting by contact.",
     ),
+    search: Optional[str] = typer.Option(
+        None,
+        "--search",
+        "-s",
+        help="Only export messages containing this text.",
+    ),
+    date: Optional[str] = typer.Option(None, "--date", help="Only this date, YYYY-MM-DD."),
+    start_date: Optional[str] = typer.Option(
+        None,
+        "--from",
+        help="Start date, YYYY-MM-DD, inclusive.",
+    ),
+    end_date: Optional[str] = typer.Option(
+        None,
+        "--to",
+        help="End date, YYYY-MM-DD, inclusive.",
+    ),
 ) -> None:
     """Export chats for a person, phone, email, or chat."""
-    output_format = output_format.lower()
-    if output_format not in {"yaml", "json"}:
-        console.print("[red]Format must be yaml or json.[/red]")
-        raise typer.Exit(1)
-
-    settings = _settings(ctx)
-    conn = _connect(ctx)
-    try:
-        chats, contacts, handles, label = _resolve_export_target(
-            conn,
-            target,
-            settings.contacts_db_paths,
-            include_groups,
-        )
-        if not chats:
-            console.print(f"[yellow]No Messages chats found for {target!r}.[/yellow]")
-            raise typer.Exit(1)
-
-        data = build_export(
-            conn,
-            chats,
-            label=label,
-            handles=handles,
-            limit=limit,
-            newest_first=True,
-        )
-        if contacts:
-            data["contacts"] = contacts
-
-        output_path = resolve_output_path(output, label, output_format)
-        _ensure_parent_dir(output_path)
-        write_export(data, output_format, output_path)
-    finally:
-        conn.close()
-
+    query = _message_query(search, date, start_date, end_date, limit, 1)
+    data = _load_export_data(ctx, target, include_groups, query)
+    output_path = _write_export_data(data, output, output_format)
     console.print(
         "[green]Exported[/green] "
         f"{data['message_count']} messages from {data['conversation_count']} chat(s)."
@@ -389,20 +457,84 @@ def _connect(ctx: typer.Context):
         raise typer.Exit(1)
 
 
+def _message_query(
+    search: Optional[str],
+    date: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+    limit: Optional[int],
+    page: int,
+) -> MessageQuery:
+    if date and (start_date or end_date):
+        console.print("[red]Use either --date or --from/--to, not both.[/red]")
+        raise typer.Exit(1)
+    offset = (page - 1) * limit if limit else 0
+    return MessageQuery(search, date, start_date, end_date, limit, offset, True)
+
+
+def _load_export_data(
+    ctx: typer.Context,
+    target: str,
+    include_groups: bool,
+    query: MessageQuery,
+) -> dict:
+    settings = _settings(ctx)
+    conn = _connect(ctx)
+    try:
+        resolution = _resolve_target(conn, target, settings.contacts_db_paths, include_groups)
+        if _handle_unselected_target(target, resolution):
+            raise typer.Exit(1)
+        data = build_export(conn, resolution.chats, resolution.label, resolution.handles, filters=query)
+        if resolution.contacts:
+            data["contacts"] = resolution.contacts
+        return data
+    except ValueError:
+        console.print("[red]Invalid date format.[/red] Use YYYY-MM-DD.")
+        raise typer.Exit(1)
+    finally:
+        conn.close()
+
+
+def _write_export_data(
+    data: dict,
+    output: Optional[str],
+    output_format: str,
+) -> str:
+    output_format = _export_format(output_format)
+    output_path = resolve_output_path(output, str(data.get("label") or "messages"), output_format)
+    _ensure_parent_dir(output_path)
+    write_export(data, output_format, output_path)
+    return output_path
+
+
+def _export_format(output_format: str) -> str:
+    normalized = output_format.lower()
+    if normalized not in EXPORT_FORMATS:
+        console.print("[red]Format must be yaml, json, csv, or xlsx.[/red]")
+        raise typer.Exit(1)
+    return normalized
+
+
 def _show_messages(
     ctx: typer.Context,
     query: Optional[str],
-    date_filter: Optional[str],
     date: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
     limit: int,
 ) -> None:
+    if date and (start_date or end_date):
+        console.print("[red]Use either --date or --from/--to, not both.[/red]")
+        raise typer.Exit(1)
+
     conn = _connect(ctx)
     try:
         rows = search_message_rows(
             conn,
             search_term=query,
-            date_filter=date_filter,
             specific_date=date,
+            start_date=start_date,
+            end_date=end_date,
             limit=limit,
             newest_first=True,
         )
@@ -430,18 +562,38 @@ def _show_messages(
     console.print(table)
 
 
-def _resolve_export_target(
+def _list_recent_chat_table(ctx: typer.Context, limit: int) -> None:
+    conn = _connect(ctx)
+    try:
+        rows = list_recent_chats(conn, limit)
+    finally:
+        conn.close()
+
+    _print_chats_table(rows, title=f"Recent chats ({len(rows)})")
+
+
+def _resolve_target(
     conn,
     target: str,
     contacts_db_paths: Optional[List[str]],
     include_groups: bool,
-) -> Tuple[List[object], List[dict], List[str], str]:
+) -> TargetResolution:
     exact_chat = find_chat_by_reference(conn, target)
     if exact_chat is not None:
         label = exact_chat["display_name"] or exact_chat["chat_identifier"] or target
-        return [exact_chat], [], [], label
+        return TargetResolution([exact_chat], [], [], label)
 
     contacts = find_contacts_by_name(target, contacts_db_paths)
+    if len(contacts) > CONTACT_OPTION_LIMIT:
+        return TargetResolution([], contacts, [], target, too_many=True)
+
+    direct_chats = _unique_chats(find_chats_by_query(conn, target, limit=CHAT_OPTION_LIMIT + 1))
+    if len(direct_chats) > CHAT_OPTION_LIMIT:
+        return TargetResolution(direct_chats, contacts, [], target, too_many=True)
+
+    if len(contacts) > 1:
+        return TargetResolution(direct_chats, contacts, [], target, ambiguous=True)
+
     handles = sorted(
         {
             handle
@@ -449,14 +601,155 @@ def _resolve_export_target(
             for handle in contact["handles"]
         }
     )
-    if handles:
-        chats = find_chats_for_handles(conn, handles, include_groups=include_groups)
+    if len(contacts) == 1 and handles:
+        chats = _unique_chats(
+            find_chats_for_handles(conn, handles, include_groups=include_groups)
+        )
         if chats:
             label = contacts[0]["name"] if contacts else target
-            return _unique_chats(chats), contacts, handles, str(label)
+            return TargetResolution(chats, contacts, handles, str(label))
 
-    chats = find_chats_by_query(conn, target, limit=20)
-    return _unique_chats(chats), contacts, handles, target
+    if len(direct_chats) > 1:
+        return TargetResolution(direct_chats, contacts, handles, target, ambiguous=True)
+
+    label = target
+    if len(direct_chats) == 1:
+        chat = direct_chats[0]
+        label = chat["display_name"] or chat["chat_identifier"] or target
+    return TargetResolution(direct_chats, contacts, handles, str(label))
+
+
+def _handle_unselected_target(target: str, resolution: TargetResolution) -> bool:
+    if resolution.too_many:
+        if resolution.contacts:
+            _print_contacts_table(
+                resolution.contacts[:CONTACT_OPTION_LIMIT],
+                title=f"Contacts matching {target!r}",
+            )
+        if resolution.chats:
+            _print_chats_table(
+                resolution.chats[:CHAT_OPTION_LIMIT],
+                title=f"Conversations matching {target!r}",
+            )
+        console.print(
+            "[yellow]Too many matches.[/yellow] "
+            "Please search more closely, or use an exact chat ID, phone, or email."
+        )
+        return True
+
+    if resolution.ambiguous:
+        if resolution.contacts:
+            _print_contacts_table(
+                resolution.contacts,
+                title=f"Contacts matching {target!r}",
+            )
+        if resolution.chats:
+            _print_chats_table(
+                resolution.chats,
+                title=f"Conversations matching {target!r}",
+            )
+        console.print(
+            "[yellow]More than one match found.[/yellow] "
+            "Please use a more specific name, phone, email, or chat ID."
+        )
+        return True
+
+    if not resolution.chats:
+        console.print(f"[yellow]No Messages chats found for {target!r}.[/yellow]")
+        return True
+
+    return False
+
+
+def _print_chats_table(chats: List[object], title: str) -> None:
+    table = Table(title=title, expand=True)
+    table.add_column("ID", style="bold cyan", no_wrap=True)
+    table.add_column("Name")
+    table.add_column("Identifier", overflow="fold")
+    table.add_column("Messages", justify="right")
+    table.add_column("Last activity", no_wrap=True)
+
+    for row in chats:
+        table.add_row(
+            str(row["ROWID"]),
+            row["display_name"] or row["chat_identifier"] or "Unknown",
+            row["chat_identifier"] or "",
+            str(row["message_count"] or 0) if "message_count" in row.keys() else "",
+            _format_date(row["last_msg_date"], "%Y-%m-%d %H:%M")
+            if "last_msg_date" in row.keys()
+            else "",
+        )
+
+    console.print(table)
+
+
+def _print_contacts_table(contacts: List[dict], title: str) -> None:
+    table = Table(title=title, expand=True)
+    table.add_column("Name", style="bold")
+    table.add_column("Handles", overflow="fold")
+    for contact in contacts:
+        table.add_row(
+            str(contact["name"]),
+            ", ".join(contact["handles"]) or "No phone/email handles",
+        )
+    console.print(table)
+
+
+def _print_export_messages(data: dict, title: str) -> None:
+    table = Table(title=title, expand=True)
+    table.add_column("When", no_wrap=True)
+    table.add_column("Chat", overflow="fold")
+    table.add_column("Sender", no_wrap=True)
+    table.add_column("Text", overflow="fold")
+
+    handle_to_name = _build_handle_name_map(data.get("contacts") or [])
+
+    for conversation in data.get("conversations", []):
+        chat = conversation.get("chat", {})
+        identifier = chat.get("identifier") or ""
+        chat_name = (
+            chat.get("display_name")
+            or handle_to_name.get(identifier)
+            or identifier
+        )
+        for message in conversation.get("messages", []):
+            table.add_row(
+                str(message.get("date") or "N/A"),
+                str(chat_name),
+                str(message.get("sender") or "Unknown"),
+                str(message.get("text") or "").replace("\n", " "),
+            )
+
+    console.print(table)
+
+
+def _view_title(data: dict, page: int, page_size: Optional[int]) -> str:
+    label = str(data.get("label") or "conversation")
+    count = int(data.get("message_count") or 0)
+    if page_size is None:
+        return f"{label} (all {count})"
+    return f"{label} page {page} ({count}/{page_size})"
+
+
+def _print_view_hint(target: str, page: int, page_size: Optional[int], data: dict) -> None:
+    if page_size is None:
+        return
+    count = int(data.get("message_count") or 0)
+    if count == page_size:
+        console.print(f"[dim]Next page:[/dim] imsg view {target!r} --page {page + 1}")
+        return
+    console.print("[dim]No more messages on the next page.[/dim]")
+
+
+def _build_handle_name_map(contacts: list) -> dict:
+    result: dict = {}
+    for contact in contacts:
+        name = contact.get("name") or ""
+        if not name:
+            continue
+        for variant in handle_variants(contact.get("handles") or []):
+            result[variant] = name
+    return result
 
 
 def _unique_chats(chats: List[object]) -> List[object]:
