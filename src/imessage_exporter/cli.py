@@ -163,6 +163,7 @@ def list_command(
             handles=resolution.handles,
             limit=limit,
             newest_first=True,
+            merged=True,
         )
     finally:
         conn.close()
@@ -362,7 +363,7 @@ def view_command(
     effective_limit = None if all_messages else page_size
     effective_page = 1 if all_messages else page
     query = _message_query(search, date, start_date, end_date, effective_limit, effective_page)
-    data = _load_export_data(ctx, target, include_groups, query)
+    data = _load_export_data(ctx, target, include_groups, query, merged=True)
     _print_export_messages(data, title=_view_title(data, effective_page, effective_limit))
     _print_view_hint(target, effective_page, effective_limit, data)
     if output:
@@ -477,6 +478,7 @@ def _load_export_data(
     target: str,
     include_groups: bool,
     query: MessageQuery,
+    merged: bool = False,
 ) -> dict:
     settings = _settings(ctx)
     conn = _connect(ctx)
@@ -484,7 +486,7 @@ def _load_export_data(
         resolution = _resolve_target(conn, target, settings.contacts_db_paths, include_groups)
         if _handle_unselected_target(target, resolution):
             raise typer.Exit(1)
-        data = build_export(conn, resolution.chats, resolution.label, resolution.handles, filters=query)
+        data = build_export(conn, resolution.chats, resolution.label, resolution.handles, filters=query, merged=merged)
         if resolution.contacts:
             data["contacts"] = resolution.contacts
         return data
