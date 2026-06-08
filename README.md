@@ -12,7 +12,7 @@ Copyright (c) 2026 Misha Lubich (ml-lubich)
 flowchart LR
     USER[("👤 you<br/>Terminal · IDE")]
     CLI{{"🧰 imsg / imessage-exporter<br/>Typer CLI"}}
-    COMMANDS["commands<br/>list · find · search · today · export"]
+    COMMANDS["commands<br/>list · find · search · semantic · today · export · index"]
     DB[("🗄 ~/Library/Messages<br/>chat.db<br/>(needs Full Disk Access)")]
     QUERY["🔍 SQL filter<br/>by date / text"]
     OUT[/"📄 stdout<br/>messages · chat list"/]
@@ -54,6 +54,8 @@ flowchart LR
     G["date in [d, d+1)"]
     H{"search text?"}
     I["text LIKE %TEXT%"]
+    M{"semantic?"}
+    N["query local FTS index"]
     J["compose WHERE"]
     K["SELECT m.text, h.id, m.date"]
     L["format rows"]
@@ -67,7 +69,9 @@ flowchart LR
     F -- no  --> J
     J --> H
     H -- yes --> I --> K
-    H -- no  --> K
+    H -- no  --> M
+    M -- yes --> N --> L
+    M -- no --> K
     K --> L --> Z
 ```
 
@@ -166,6 +170,31 @@ imsg export "Angel Michel" --include-groups --limit 500
 ```bash
 imsg search hello
 imsg search meeting --date 2026-06-05
+```
+
+### Indexed message search
+
+Build a local all-message index from your real Messages database:
+
+```bash
+imsg index build
+```
+
+Then search that index:
+
+```bash
+imsg semantic "plans for dinner"
+imsg semantic "flight details" --limit 10
+```
+
+The index is stored by default at
+`~/Library/Caches/imessage-exporter/search-index.sqlite`. It is a local SQLite
+FTS/BM25 index, so it is fast and private, but it is not an external embedding
+model. Rebuild it when you want newly arrived messages included:
+
+```bash
+imsg index status
+imsg index build
 ```
 
 ### Today

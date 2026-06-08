@@ -31,4 +31,6 @@ venv.bak/
 .coverage
 htmlcov/
 *.db
+*.sqlite
+*.sqlite-*
 exports/

@@ -19,6 +19,12 @@ from .core import (
     write_export,
 )
 from .database import CHAT_DB_PATH, get_db_connection
+from .search_index import (
+    build_search_index,
+    format_index_date,
+    index_status,
+    search_index,
+)
 from .utils import cocoa_to_datetime
 
 
@@ -29,6 +35,11 @@ app = typer.Typer(
     invoke_without_command=True,
     rich_markup_mode="rich",
 )
+index_app = typer.Typer(
+    help="Build and inspect the local all-message search index.",
+    rich_markup_mode="rich",
+)
+app.add_typer(index_app, name="index")
 
 BANNER = [
     " _                                 ",
@@ -165,6 +176,106 @@ def search_command(
 ) -> None:
     """Search message text."""
     _show_messages(ctx, query=query, date_filter=None, date=date, limit=limit)
+
+
+@app.command("semantic")
+def semantic_command(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Natural-language-ish message search query."),
+    limit: int = typer.Option(20, "--limit", "-n", min=1, max=100, help="Max indexed matches."),
+    index_path: Optional[str] = typer.Option(
+        None,
+        "--index-path",
+        help="Path to the local search index.",
+    ),
+) -> None:
+    """Search the local all-message index."""
+    try:
+        rows = search_index(query, index_path=index_path, limit=limit)
+    except FileNotFoundError:
+        console.print("[yellow]No search index found yet.[/yellow]")
+        console.print("Run `imsg index build` first.")
+        raise typer.Exit(1)
+    except Exception as exc:
+        console.print(f"[red]Search index error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    table = Table(title=f"Indexed matches ({len(rows)})", expand=True)
+    table.add_column("When", no_wrap=True)
+    table.add_column("Chat", overflow="fold")
+    table.add_column("Sender", no_wrap=True)
+    table.add_column("Text", overflow="fold")
+
+    for row in rows:
+        table.add_row(
+            _format_date(row["date"], "%Y-%m-%d %H:%M"),
+            row["chat_name"] or row["chat_identifier"] or "",
+            row["sender"] or "Unknown",
+            (row["text"] or "").replace("\n", " "),
+        )
+
+    console.print(table)
+
+
+@index_app.command("build")
+def index_build_command(
+    ctx: typer.Context,
+    index_path: Optional[str] = typer.Option(
+        None,
+        "--index-path",
+        help="Path to write the local search index.",
+    ),
+) -> None:
+    """Build or rebuild the all-message search index."""
+    settings = _settings(ctx)
+    conn = _connect(ctx)
+    try:
+        result = build_search_index(
+            conn,
+            index_path=index_path,
+            db_path=settings.db_path,
+        )
+    finally:
+        conn.close()
+
+    console.print(
+        "[green]Indexed[/green] "
+        f"{result['message_count']} messages into {result['index_path']}."
+    )
+    console.print(
+        f"[bold]Latest message:[/bold] {format_index_date(result['latest_message_date'])}"
+    )
+
+
+@index_app.command("status")
+def index_status_command(
+    index_path: Optional[str] = typer.Option(
+        None,
+        "--index-path",
+        help="Path to the local search index.",
+    ),
+) -> None:
+    """Show local search index status."""
+    status = index_status(index_path=index_path)
+    table = Table(title="Search index", expand=True)
+    table.add_column("Field", style="bold")
+    table.add_column("Value", overflow="fold")
+
+    for key in [
+        "exists",
+        "index_path",
+        "source_db_path",
+        "built_at",
+        "message_count",
+        "latest_message_date",
+        "version",
+    ]:
+        value = status.get(key)
+        if key == "latest_message_date" and value and value.isdigit():
+            value = format_index_date(int(value))
+        table.add_row(key, value or "")
+
+    console.print(table)
 
 
 @app.command("today")
