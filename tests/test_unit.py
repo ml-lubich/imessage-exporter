@@ -1,12 +1,14 @@
 import pytest
-import sys
 import datetime
 import sqlite3
-from unittest.mock import MagicMock, patch, call
-from imessage_exporter.cli import main
+from typer.testing import CliRunner
+from unittest.mock import MagicMock, patch
+from imessage_exporter.cli import app
 from imessage_exporter.core import list_chats, search_messages
 from imessage_exporter.database import get_db_connection
 from imessage_exporter.utils import cocoa_to_datetime, COCOA_EPOCH
+
+runner = CliRunner()
 
 # --- Utils Tests ---
 
@@ -44,10 +46,10 @@ def test_list_chats():
     
     # Mock data: ROWID, chat_identifier, display_name, last_msg_date
     data = [
-        {"ROWID": 1, "chat_identifier": "user@example.com", "display_name": "User", "last_msg_date": 0},
-        {"ROWID": 2, "chat_identifier": "unknown", "display_name": None, "last_msg_date": None}
+        {"ROWID": 1, "chat_identifier": "user@example.com", "display_name": "User", "last_msg_date": 0, "service_name": "iMessage", "message_count": 1},
+        {"ROWID": 2, "chat_identifier": "unknown", "display_name": None, "last_msg_date": None, "service_name": "iMessage", "message_count": 0}
     ]
-    mock_cursor.__iter__.return_value = iter(data)
+    mock_cursor.fetchall.return_value = data
 
     with patch("builtins.print") as mock_print:
         list_chats(mock_conn)
@@ -109,32 +111,35 @@ def test_search_messages_invalid_date():
 # --- CLI Tests ---
 
 def test_main_cli_list_chats():
-    with patch("sys.argv", ["imessage-exporter", "--list-chats"]):
-        with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
-            with patch("imessage_exporter.cli.list_chats") as mock_list:
-                mock_conn = MagicMock()
-                mock_connect.return_value = mock_conn
-                main()
-                mock_connect.assert_called_once()
-                mock_list.assert_called_once()
-                mock_conn.close.assert_called_once()
+    with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
+        with patch("imessage_exporter.cli.list_recent_chats", return_value=[]) as mock_list:
+            mock_conn = MagicMock()
+            mock_connect.return_value = mock_conn
+            result = runner.invoke(app, ["list"])
+            assert result.exit_code == 0
+            mock_connect.assert_called_once()
+            mock_list.assert_called_once_with(mock_conn, 25)
+            mock_conn.close.assert_called_once()
 
 def test_main_cli_search():
-    with patch("sys.argv", ["imessage-exporter", "--search", "test"]):
-        with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
-            with patch("imessage_exporter.cli.search_messages") as mock_search:
-                mock_conn = MagicMock()
-                mock_connect.return_value = mock_conn
-                main()
-                mock_search.assert_called_once_with(mock_conn, "test", None, None)
+    with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
+        with patch("imessage_exporter.cli.search_message_rows", return_value=[]) as mock_search:
+            mock_conn = MagicMock()
+            mock_connect.return_value = mock_conn
+            result = runner.invoke(app, ["search", "test"])
+            assert result.exit_code == 0
+            mock_search.assert_called_once_with(
+                mock_conn,
+                search_term="test",
+                date_filter=None,
+                specific_date=None,
+                limit=50,
+                newest_first=True,
+            )
 
-    with patch("sys.argv", ["imessage-exporter"]):
-        with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
-             with patch("argparse.ArgumentParser.print_help") as mock_help:
-                mock_conn = MagicMock()
-                mock_connect.return_value = mock_conn
-                main()
-                mock_help.assert_called_once()
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
 
 # --- Edge Case Tests ---
 
@@ -183,4 +188,3 @@ def test_cocoa_to_datetime_negative():
     dt = cocoa_to_datetime(-1_000_000_000)
     expected = COCOA_EPOCH - datetime.timedelta(seconds=1)
     assert dt == expected
-

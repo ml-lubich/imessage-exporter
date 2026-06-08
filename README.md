@@ -1,18 +1,23 @@
 # iMessage Exporter
 
-> A Python tool to search and export iMessages from your local macOS
-> `chat.db`.
+> A colorful Typer CLI to find, search, and export iMessages from your local
+> macOS `chat.db`.
+
+Copyright (c) 2026 Misha Lubich (ml-lubich)
+
+- Website: <https://mishalubich.com>
+- GitHub: <https://github.com/ml-lubich>
 
 ```mermaid
 flowchart LR
     USER[("👤 you<br/>Terminal · IDE")]
-    CLI{{"🧰 imessage-exporter<br/>CLI"}}
-    FLAGS["🎚 flags<br/>--search · --today · --date · --list-chats"]
+    CLI{{"🧰 imsg / imessage-exporter<br/>Typer CLI"}}
+    COMMANDS["commands<br/>list · find · search · today · export"]
     DB[("🗄 ~/Library/Messages<br/>chat.db<br/>(needs Full Disk Access)")]
     QUERY["🔍 SQL filter<br/>by date / text"]
     OUT[/"📄 stdout<br/>messages · chat list"/]
 
-    USER --> CLI --> FLAGS --> QUERY
+    USER --> CLI --> COMMANDS --> QUERY
     QUERY --> DB
     DB --> QUERY --> OUT
 
@@ -21,7 +26,7 @@ flowchart LR
     classDef brain fill:#161b22,stroke:#d29922,stroke-width:1.5px,color:#e6edf3;
     classDef out fill:#0e1116,stroke:#a371f7,stroke-width:1.5px,color:#e6edf3;
     class USER,DB io;
-    class FLAGS,QUERY tool;
+    class COMMANDS,QUERY tool;
     class CLI brain;
     class OUT out;
 ```
@@ -33,21 +38,21 @@ flowchart LR
 - [Filter algorithm](#filter-algorithm)
 - [Usage](#usage)
 - [Permissions](#permissions)
-- [🗺️ Repository map](#️-repository-map)
-- [📊 Code composition](#-code-composition)
+- [Repository map](#️-repository-map)
+- [Code composition](#-code-composition)
 
 ## Filter algorithm
 
 ```mermaid
 flowchart LR
-    A([CLI flags])
-    B{"--list-chats?"}
+    A([CLI command])
+    B{"list?"}
     C["SELECT chats"]
-    D{"--today?"}
+    D{"today?"}
     E["date >= today 00:00"]
-    F{"--date YYYY-MM-DD?"}
+    F{"search --date YYYY-MM-DD?"}
     G["date in [d, d+1)"]
-    H{"--search TEXT?"}
+    H{"search text?"}
     I["text LIKE %TEXT%"]
     J["compose WHERE"]
     K["SELECT m.text, h.id, m.date"]
@@ -71,13 +76,13 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant U as user
-    participant CLI as imessage-exporter
-    participant P as arg parser
+    participant CLI as imsg
+    participant P as Typer command
     participant Q as SQL builder
     participant DB as chat.db (SQLite)
 
-    U->>CLI: --search hello --today
-    CLI->>P: parse flags
+    U->>CLI: today hello
+    CLI->>P: parse command
     P->>Q: build WHERE clauses<br/>(date range, LIKE)
     Q->>DB: SELECT m.text, h.id, m.date<br/>FROM message m JOIN handle h
     DB-->>Q: rows
@@ -88,41 +93,96 @@ sequenceDiagram
 ## Installation
 
 1. Clone this repository.
-2. Install in editable mode:
+2. Install with `uv`:
+   ```bash
+   uv sync --dev
+   ```
+
+You can also install in editable mode with `pip`:
    ```bash
    pip install -e .
    ```
 
 ## Usage
 
-The tool provides a CLI command `imessage-exporter`.
+The package installs two entrypoints:
 
-### List Recent Chats
+- `imsg`, the short daily-driver command.
+- `imessage-exporter`, the longer memorable project name.
+
+Both commands are the same CLI.
+
 ```bash
-imessage-exporter --list-chats
+uv run imsg
 ```
 
-### Search Messages
-Search for a specific term:
+### List recent chats
+
 ```bash
-imessage-exporter --search "hello"
+imsg list
+imsg list 100
 ```
 
-### Filter by Date
-Get messages from today:
+### Find a person, phone, email, or chat
+
 ```bash
-imessage-exporter --today
+imsg find misha
+imsg find 5551234
+imsg find alice@example.com
 ```
 
-Get messages from a specific date:
+### Export
+
+Export by contact name, partial phone/email, exact chat identifier, or chat `ROWID`:
+
 ```bash
-imessage-exporter --date 2023-10-27
+imsg export "Angel Michel"
+imsg export 5551234
+imsg export alice@example.com
+imsg export 46 --format json
 ```
 
-### Combine Filters
-Search for "meeting" in messages from today:
+Exports write to the current directory by default with a generated filename like
+`imessage-angel-michel-20260605-144530.yaml`.
+
+Use `--output` to choose a file or directory:
+
 ```bash
-imessage-exporter --search "meeting" --today
+imsg export "Angel Michel" --output ./exports
+imsg export "Angel Michel" --output angel-michel.yaml
+```
+
+By default, contact exports use direct one-on-one chats for the contact's phone
+and email handles. Add `--include-groups` if you also want group chats that
+include that contact. Add `--limit` to export only the most recent messages per
+chat.
+
+```bash
+imsg export "Angel Michel" --include-groups --limit 500
+```
+
+### Search messages
+
+```bash
+imsg search hello
+imsg search meeting --date 2026-06-05
+```
+
+### Today
+
+```bash
+imsg today
+imsg today meeting
+imsg today meeting --limit 25
+```
+
+### Custom database paths
+
+Global options go before the command:
+
+```bash
+imsg --db-path ./chat.db list
+imsg --contacts-db-path ./AddressBook-v22.abcddb export misha
 ```
 
 ## Permissions

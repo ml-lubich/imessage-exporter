@@ -7,19 +7,34 @@ name = "imessage-exporter"
 dynamic = ["version"]
 description = "A tool to export and search iMessages from local chat.db"
 authors = [
-  { name="User", email="user@example.com" },
+  { name="Misha Lubich" },
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
+license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
 ]
-dependencies = []
+dependencies = [
+    "PyYAML>=6.0.1,<7",
+    "rich>=13.7,<15",
+    "typer>=0.12,<1",
+]
+
+[project.urls]
+Homepage = "https://mishalubich.com"
+Repository = "https://github.com/ml-lubich/imessage-exporter"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4,<9",
+]
 
 [project.scripts]
 imessage-exporter = "imessage_exporter.cli:main"
+imsg = "imessage_exporter.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

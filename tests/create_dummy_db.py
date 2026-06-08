@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import datetime
+import sys
 
 def create_dummy_db(db_path: str):
     """Create a dummy chat.db with sample data."""
@@ -15,14 +16,16 @@ def create_dummy_db(db_path: str):
     CREATE TABLE chat (
         ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
         chat_identifier TEXT,
-        display_name TEXT
+        display_name TEXT,
+        service_name TEXT
     )
     """)
     
     cursor.execute("""
     CREATE TABLE handle (
         ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
-        id TEXT
+        id TEXT,
+        service TEXT
     )
     """)
     
@@ -45,10 +48,13 @@ def create_dummy_db(db_path: str):
     
     # Insert sample data
     # Chat 1: with "alice@example.com"
-    cursor.execute("INSERT INTO handle (id) VALUES (?)", ("alice@example.com",))
+    cursor.execute("INSERT INTO handle (id, service) VALUES (?, ?)", ("alice@example.com", "iMessage"))
     alice_handle_id = cursor.lastrowid
     
-    cursor.execute("INSERT INTO chat (chat_identifier, display_name) VALUES (?, ?)", ("alice@example.com", "Alice"))
+    cursor.execute(
+        "INSERT INTO chat (chat_identifier, display_name, service_name) VALUES (?, ?, ?)",
+        ("alice@example.com", "Alice", "iMessage"),
+    )
     chat_id_1 = cursor.lastrowid
     
     # Messages for Chat 1
@@ -76,4 +82,4 @@ def create_dummy_db(db_path: str):
     print(f"Created dummy database at {db_path}")
 
 if __name__ == "__main__":
-    create_dummy_db("dummy_chat.db")
+    create_dummy_db(sys.argv[1] if len(sys.argv) > 1 else "dummy_chat.db")
