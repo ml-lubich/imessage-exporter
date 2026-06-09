@@ -478,7 +478,7 @@ def _tui_query(
     if date and (start_date or end_date):
         console.print("[red]Use either --date or --from/--to, not both.[/red]")
         raise typer.Exit(1)
-    return MessageQuery(search, date, start_date, end_date, None, 0, True)
+    return MessageQuery(search, date, start_date, end_date, None, 0, False)
 
 
 def _extract_messages(data: dict) -> list:
@@ -776,6 +776,12 @@ def _ensure_parent_dir(path: str) -> None:
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
+
+
+def _make_export_fn(data: dict, output, output_format: str):
+    def _fn() -> str:
+        return _write_export_data(data, output, output_format)
+    return _fn
 
 
 if __name__ == "__main__":

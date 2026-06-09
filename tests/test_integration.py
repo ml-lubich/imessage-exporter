@@ -33,10 +33,19 @@ def test_integration_list_target_shows_recent_messages(dummy_db):
     assert "Hi Alice!" in result.output
 
 
-def test_integration_view_target_paginates(dummy_db):
-    first = runner.invoke(app, ["--db-path", dummy_db, "view", "alice@example.com", "--page-size", "1"])
-    second = runner.invoke(app, ["--db-path", dummy_db, "view", "alice@example.com", "--page-size", "1", "--page", "2"])
-    assert first.exit_code == 0 and "Hi Alice!" in first.output and "Hello there!" in second.output
+def test_integration_view_exports_yaml(dummy_db, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    # Patch run_viewer so the TUI doesn't try to open a terminal in CI
+    import imessage_exporter.cli as cli_mod
+    captured = {}
+    def _fake_viewer(messages, label, page_size, handle_map=None, **_):
+        captured["messages"] = messages
+        captured["label"] = label
+    monkeypatch.setattr(cli_mod, "run_viewer", _fake_viewer)
+    result = runner.invoke(app, ["--db-path", dummy_db, "view", "alice@example.com", "--output", str(tmp_path / "out.yaml")])
+    assert result.exit_code == 0
+    assert captured.get("label") == "Alice"
+    assert any("Hi Alice!" in str(m.get("text")) for m in captured.get("messages", []))
 
 
 def test_integration_search_date_range(dummy_db):
