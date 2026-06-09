@@ -29,14 +29,23 @@ Use `--db-path` with a fixture or copied database when testing without the live 
 | `No search index found yet` | `imsg semantic` ran before indexing | Run `imsg index build` |
 | `Invalid date format` | Date is not `YYYY-MM-DD` | Re-run with an ISO date |
 | Multiple matches printed | Target is ambiguous | Use a chat ID, phone, email, or more specific name |
+| `ModuleNotFoundError: No module named 'textual'` | `imsg` tool env is stale after adding a new dep | Run `uv tool install --editable . --force` from repo root |
 
 ## Message search workflow
 
 Use `imsg search [QUERY] --date YYYY-MM-DD` for one calendar day. Use `imsg search [QUERY] --from YYYY-MM-DD --to YYYY-MM-DD` for inclusive calendar-day ranges; omit `QUERY` for date-only browsing.
 
+## Installing / upgrading the global tool
+
+After cloning or pulling new deps, reinstall the tool env:
+
+```bash
+uv tool install --editable . --force
+```
+
 ## View and export workflow
 
-Start with `imsg find NAME` when the exact target is unknown, use `imsg view TARGET --page N` to inspect messages, then run `imsg export TARGET` for the full conversation. Add `--search`, `--date`, or `--from` and `--to` to `view` or `export` when the operator only wants a filtered slice.
+Start with `imsg find NAME` when the exact target is unknown, then run `imsg view TARGET` to open the interactive TUI (arrow keys navigate pages, q quits). Run `imsg export TARGET` for a full conversation dump. Add `--search`, `--date`, or `--from`/`--to` to `view` or `export` for filtered slices.
 
 ## Search index maintenance
 
