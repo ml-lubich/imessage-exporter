@@ -8,6 +8,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .contacts import find_contacts_by_name, handle_variants
+from .tui import run_viewer
 from .core import (
     MessageQuery,
     build_export,
@@ -348,9 +349,7 @@ def index_status_command(
 def view_command(
     ctx: typer.Context,
     target: str = typer.Argument(..., help="Contact name, phone/email, chat ID, or chat identifier."),
-    page: int = typer.Option(1, "--page", "-p", min=1, help="Page number to show."),
-    page_size: int = typer.Option(DEFAULT_VIEW_PAGE_SIZE, "--page-size", "-n", min=1, max=500, help="Messages per page."),
-    all_messages: bool = typer.Option(False, "--all", "-a", help="Show all messages (ignores --page and --page-size)."),
+    page_size: int = typer.Option(DEFAULT_VIEW_PAGE_SIZE, "--page-size", "-n", min=1, max=500, help="Messages per page in the viewer."),
     search: Optional[str] = typer.Option(None, "--search", "-s", help="Only messages containing this text."),
     date: Optional[str] = typer.Option(None, "--date", help="Only this date, YYYY-MM-DD."),
     start_date: Optional[str] = typer.Option(None, "--from", help="Start date, YYYY-MM-DD, inclusive."),
@@ -359,17 +358,14 @@ def view_command(
     output_format: str = typer.Option("yaml", "--format", "-f", case_sensitive=False, help="Export format for --output."),
     include_groups: bool = typer.Option(False, "--include-groups", help="Include group chats when resolving contacts."),
 ) -> None:
-    """Page through one conversation and optionally export filtered messages."""
-    effective_limit = None if all_messages else page_size
-    effective_page = 1 if all_messages else page
-    query = _message_query(search, date, start_date, end_date, effective_limit, effective_page)
+    """Browse a conversation interactively. Arrow keys navigate pages, q quits."""
+    query = _tui_query(search, date, start_date, end_date)
     data = _load_export_data(ctx, target, include_groups, query, merged=True)
-    _print_export_messages(data, title=_view_title(data, effective_page, effective_limit))
-    _print_view_hint(target, effective_page, effective_limit, data)
     if output:
-        export_query = _message_query(search, date, start_date, end_date, None, 1)
-        export_data = _load_export_data(ctx, target, include_groups, export_query)
-        _write_export_data(export_data, output, output_format)
+        _write_export_data(data, output, output_format)
+    messages = _extract_messages(data)
+    handle_map = _build_handle_name_map(data.get("contacts") or [])
+    run_viewer(messages, str(data.get("label") or target), page_size, handle_map)
 
 
 @app.command("export")
@@ -471,6 +467,26 @@ def _message_query(
         raise typer.Exit(1)
     offset = (page - 1) * limit if limit else 0
     return MessageQuery(search, date, start_date, end_date, limit, offset, True)
+
+
+def _tui_query(
+    search: Optional[str],
+    date: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> MessageQuery:
+    if date and (start_date or end_date):
+        console.print("[red]Use either --date or --from/--to, not both.[/red]")
+        raise typer.Exit(1)
+    return MessageQuery(search, date, start_date, end_date, None, 0, True)
+
+
+def _extract_messages(data: dict) -> list:
+    return [
+        msg
+        for conv in data.get("conversations", [])
+        for msg in conv.get("messages", [])
+    ]
 
 
 def _load_export_data(
@@ -724,23 +740,6 @@ def _print_export_messages(data: dict, title: str) -> None:
 
     console.print(table)
 
-
-def _view_title(data: dict, page: int, page_size: Optional[int]) -> str:
-    label = str(data.get("label") or "conversation")
-    count = int(data.get("message_count") or 0)
-    if page_size is None:
-        return f"{label} (all {count})"
-    return f"{label} page {page} ({count}/{page_size})"
-
-
-def _print_view_hint(target: str, page: int, page_size: Optional[int], data: dict) -> None:
-    if page_size is None:
-        return
-    count = int(data.get("message_count") or 0)
-    if count == page_size:
-        console.print(f"[dim]Next page:[/dim] imsg view {target!r} --page {page + 1}")
-        return
-    console.print("[dim]No more messages on the next page.[/dim]")
 
 
 def _build_handle_name_map(contacts: list) -> dict:

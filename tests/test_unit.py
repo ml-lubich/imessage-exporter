@@ -77,17 +77,18 @@ def test_search_messages_basic():
     assert "LIKE ?" in query
     assert "%hello%" in params
 
-def test_search_messages_today():
+def test_search_messages_date_range():
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
     mock_cursor.fetchall.return_value = []
 
-    search_messages(mock_conn, date_filter="today")
+    search_messages(mock_conn, start_date="2023-10-27", end_date="2023-10-28")
     
     args, _ = mock_cursor.execute.call_args
     query = args[0]
     assert "message.date >= ?" in query
+    assert "message.date < ?" in query
 
 def test_search_messages_specific_date():
     mock_conn = MagicMock()
@@ -110,6 +111,11 @@ def test_search_messages_invalid_date():
 
 # --- CLI Tests ---
 
+def test_main_cli_short_help_alias():
+    result = runner.invoke(app, ["-h"])
+    assert result.exit_code == 0 and "Usage:" in result.output
+
+
 def test_main_cli_list_chats():
     with patch("imessage_exporter.cli.get_db_connection") as mock_connect:
         with patch("imessage_exporter.cli.list_recent_chats", return_value=[]) as mock_list:
@@ -131,8 +137,9 @@ def test_main_cli_search():
             mock_search.assert_called_once_with(
                 mock_conn,
                 search_term="test",
-                date_filter=None,
                 specific_date=None,
+                start_date=None,
+                end_date=None,
                 limit=50,
                 newest_first=True,
             )

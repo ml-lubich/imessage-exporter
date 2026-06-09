@@ -12,7 +12,7 @@ Copyright (c) 2026 Misha Lubich (ml-lubich)
 flowchart LR
     USER[("👤 you<br/>Terminal · IDE")]
     CLI{{"🧰 imsg / imessage-exporter<br/>Typer CLI"}}
-    COMMANDS["commands<br/>list · find · search · semantic · today · export · index"]
+    COMMANDS["commands<br/>list · find · search · semantic · export · index"]
     DB[("🗄 ~/Library/Messages<br/>chat.db<br/>(needs Full Disk Access)")]
     QUERY["🔍 SQL filter<br/>by date / text"]
     OUT[/"📄 stdout<br/>messages · chat list"/]
@@ -37,6 +37,7 @@ flowchart LR
 - [Query flow (sequence)](#query-flow-sequence)
 - [Filter algorithm](#filter-algorithm)
 - [Usage](#usage)
+- [Engineering docs](#engineering-docs)
 - [Permissions](#permissions)
 - [Repository map](#️-repository-map)
 - [Code composition](#-code-composition)
@@ -48,8 +49,8 @@ flowchart LR
     A([CLI command])
     B{"list?"}
     C["SELECT chats"]
-    D{"today?"}
-    E["date >= today 00:00"]
+    D{"search --from / --to?"}
+    E["date in [from, to]"]
     F{"search --date YYYY-MM-DD?"}
     G["date in [d, d+1)"]
     H{"search text?"}
@@ -85,7 +86,7 @@ sequenceDiagram
     participant Q as SQL builder
     participant DB as chat.db (SQLite)
 
-    U->>CLI: today hello
+    U->>CLI: search hello --from 2026-06-01 --to 2026-06-08
     CLI->>P: parse command
     P->>Q: build WHERE clauses<br/>(date range, LIKE)
     Q->>DB: SELECT m.text, h.id, m.date<br/>FROM message m JOIN handle h
@@ -102,7 +103,7 @@ sequenceDiagram
    uv sync --dev
    ```
 
-You can also install in editable mode with `pip`:
+Fallback only, if `uv` is unavailable, install in editable mode with `pip`:
    ```bash
    pip install -e .
    ```
@@ -118,7 +119,10 @@ Both commands are the same CLI.
 
 ```bash
 uv run imsg
+imsg -h
 ```
+
+Use `imsg -h` or `imsg --help` to show the help page.
 
 ### List recent chats
 
@@ -127,12 +131,46 @@ imsg list
 imsg list 100
 ```
 
+You can also list recent messages for a person, phone number, email address, or
+chat ID. Partial names work when they resolve to one conversation:
+
+```bash
+imsg list "Angel Michel"
+imsg list +15106410077
+imsg list alice@example.com --limit 50
+```
+
+If a partial search matches several contacts or conversations, `imsg list`
+prints the options instead of guessing. Use the chat ID, phone, email, or a more
+specific name to continue. Very broad searches show a "too many matches" prompt
+after 5 contact matches or 10 conversation matches.
+
 ### Find a person, phone, email, or chat
 
 ```bash
 imsg find misha
 imsg find 5551234
 imsg find alice@example.com
+```
+
+### View a conversation page by page
+
+Use `view` when you want to inspect messages before exporting. Page 1 shows the
+newest messages by default.
+
+```bash
+imsg view "Angel Michel"
+imsg view "Angel Michel" --page 2 --page-size 50
+imsg view "Angel Michel" --search dinner
+imsg view "Angel Michel" --date 2026-06-05
+imsg view "Angel Michel" --from 2026-06-01 --to 2026-06-08
+```
+
+Add `--output` to export all messages matching the same target and filters while
+still printing the current page:
+
+```bash
+imsg view "Angel Michel" --search dinner --output ./exports --format yaml
 ```
 
 ### Export
@@ -144,6 +182,17 @@ imsg export "Angel Michel"
 imsg export 5551234
 imsg export alice@example.com
 imsg export 46 --format json
+imsg export "Angel Michel" --format csv
+imsg export "Angel Michel" --format xlsx
+```
+
+By default, `export` writes the full resolved conversation. Add filters when you
+only want part of it:
+
+```bash
+imsg export "Angel Michel" --search dinner
+imsg export "Angel Michel" --date 2026-06-05
+imsg export "Angel Michel" --from 2026-06-01 --to 2026-06-08
 ```
 
 Exports write to the current directory by default with a generated filename like
@@ -165,12 +214,25 @@ chat.
 imsg export "Angel Michel" --include-groups --limit 500
 ```
 
+Supported export formats:
+
+- `yaml` and `json` preserve the full nested export payload.
+- `csv` writes one message per row for spreadsheets and data analysis.
+- `xlsx` writes a workbook with `Messages`, `Conversations`, and `Daily Counts`
+  sheets so you can quickly sort, filter, and chart activity.
+
 ### Search messages
 
 ```bash
 imsg search hello
 imsg search meeting --date 2026-06-05
+imsg search --from 2026-06-01 --to 2026-06-08
+imsg search meeting --from 2026-06-01 --to 2026-06-08
 ```
+
+Use `--date` for one calendar day, or `--from` and `--to` for an inclusive
+calendar-day range. The text argument is optional, so date-only searches and
+text-plus-date searches use the same `search` command.
 
 ### Indexed message search
 
@@ -197,14 +259,6 @@ imsg index status
 imsg index build
 ```
 
-### Today
-
-```bash
-imsg today
-imsg today meeting
-imsg today meeting --limit 25
-```
-
 ### Custom database paths
 
 Global options go before the command:
@@ -217,6 +271,14 @@ imsg --contacts-db-path ./AddressBook-v22.abcddb export misha
 ## Permissions
 
 This tool requires **Full Disk Access** for the terminal or IDE running it, as it reads directly from `~/Library/Messages/chat.db`.
+
+## Engineering docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/API.md`](docs/API.md)
+- [`docs/TESTING.md`](docs/TESTING.md)
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
 
 
 ## 🗺️ Repository map
